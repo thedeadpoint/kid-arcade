@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Photo Memory</title>
+<style>
+  :root{
+    --bg:#f5f4ef;
+    --panel:#fff;
+    --text:#1f2933;
+    --muted:#6b7280;
+    --accent:#5b7cfa;
+    --card:#dfe6ef;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    min-height:100vh;
+    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    padding:max(16px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  h1{
+    margin:4px 0 8px;
+    font-size:clamp(28px,7vw,42px);
+    text-align:center;
+  }
+  .sub{
+    text-align:center;
+    color:var(--muted);
+    margin-bottom:16px;
+  }
+  .panel{
+    background:var(--panel);
+    border-radius:18px;
+    padding:14px;
+    box-shadow:0 6px 22px rgba(0,0,0,.08);
+  }
+  .controls{display:grid;gap:10px}
+  label.button,button{
+    min-height:48px;
+    border:0;
+    border-radius:12px;
+    font-size:17px;
+    padding:0 14px;
+    font-weight:700;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    touch-action:manipulation;
+  }
+  label.button,button.primary{
+    background:var(--accent);
+    color:#fff;
+  }
+  button.secondary{
+    background:#e8edf3;
+    color:var(--text);
+  }
+  button:disabled{opacity:.45}
+  input[type=file]{display:none}
+
+  .status{
+    text-align:center;
+    margin:12px 0 4px;
+    font-weight:700;
+    min-height:24px;
+  }
+  .hint{
+    text-align:center;
+    color:var(--muted);
+    font-size:14px;
+    margin-bottom:12px;
+  }
+  #board{
+    display:grid;
+    gap:10px;
+    margin-top:14px;
+  }
+  .card{
+    position:relative;
+    aspect-ratio:1/1;
+    perspective:900px;
+    cursor:pointer;
+    touch-action:manipulation;
+  }
+  .inner{
+    position:absolute;
+    inset:0;
+    transform-style:preserve-3d;
+    transition:transform .28s ease;
+  }
+  .card.flipped .inner,
+  .card.matched .inner{
+    transform:rotateY(180deg);
+  }
+  .face{
+    position:absolute;
+    inset:0;
+    border-radius:14px;
+    backface-visibility:hidden;
+    overflow:hidden;
+    box-shadow:0 4px 10px rgba(0,0,0,.12);
+  }
+  .front{
+    background:linear-gradient(145deg,#eef2f8,#d5deea);
+    display:grid;
+    place-items:center;
+    font-size:clamp(28px,8vw,46px);
+    user-select:none;
+  }
+  .back{
+    transform:rotateY(180deg);
+    background:#fff;
+  }
+  .back img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
+  }
+  .matched .face{
+    box-shadow:0 0 0 3px rgba(35,160,90,.3),0 4px 10px rgba(0,0,0,.10);
+  }
+  .celebrate{
+    animation:pop .55s ease;
+  }
+  @keyframes pop{
+    0%{transform:scale(.97)}
+    45%{transform:scale(1.03)}
+    100%{transform:scale(1)}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🃏 Photo Memory</h1>
+  <div class="sub">Pick some photos. Find all the matching pairs.</div>
+
+  <div class="panel controls">
+    <label class="button" for="photos">Choose Photos</label>
+    <input id="photos" type="file" accept="image/*" multiple />
+
+    <button id="startBtn" class="primary" disabled>Start Game</button>
+    <button id="newBtn" class="secondary" disabled>Shuffle Again</button>
+  </div>
+
+  <div id="status" class="status">Choose 3–8 photos to begin.</div>
+  <div class="hint">Tap two cards. Matching photos stay face-up.</div>
+  <div id="board"></div>
+</div>
+
+<script>
+(() => {
+  const photosInput = document.getElementById('photos');
+  const startBtn = document.getElementById('startBtn');
+  const newBtn = document.getElementById('newBtn');
+  const status = document.getElementById('status');
+  const board = document.getElementById('board');
+
+  let urls = [];
+  let selected = [];
+  let first = null;
+  let second = null;
+  let lock = false;
+  let matches = 0;
+  let moves = 0;
+
+  photosInput.addEventListener('change', () => {
+    urls.forEach(u => URL.revokeObjectURL(u));
+    urls = [];
+    const files = Array.from(photosInput.files || []).slice(0, 8);
+
+    if (files.length < 3) {
+      startBtn.disabled = true;
+      newBtn.disabled = true;
+      status.textContent = 'Choose at least 3 photos.';
+      return;
+    }
+
+    urls = files.map(f => URL.createObjectURL(f));
+    selected = urls.slice();
+    startBtn.disabled = false;
+    newBtn.disabled = true;
+    status.textContent = `${selected.length} photos selected.`;
+  });
+
+  startBtn.addEventListener('click', startGame);
+  newBtn.addEventListener('click', startGame);
+
+  function startGame() {
+    if (selected.length < 3) return;
+
+    board.innerHTML = '';
+    first = null;
+    second = null;
+    lock = false;
+    matches = 0;
+    moves = 0;
+
+    const deck = [];
+    selected.forEach((url, i) => {
+      deck.push({id:i, url});
+      deck.push({id:i, url});
+    });
+
+    shuffle(deck);
+
+    const cols = deck.length <= 8 ? 4 : deck.length <= 12 ? 4 : 4;
+    board.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+    deck.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.id = item.id;
+
+      card.innerHTML = `
+        <div class="inner">
+          <div class="face front">?</div>
+          <div class="face back"><img alt="" src="${item.url}"></div>
+        </div>
+      `;
+      card.addEventListener('click', () => flipCard(card));
+      board.appendChild(card);
+    });
+
+    status.textContent = `0 matches · 0 moves`;
+    newBtn.disabled = false;
+  }
+
+  function flipCard(card) {
+    if (lock || card.classList.contains('flipped') || card.classList.contains('matched')) return;
+
+    card.classList.add('flipped');
+
+    if (!first) {
+      first = card;
+      return;
+    }
+
+    second = card;
+    moves++;
+
+    const same = first.dataset.id === second.dataset.id;
+
+    if (same) {
+      first.classList.add('matched');
+      second.classList.add('matched');
+      first.classList.remove('flipped');
+      second.classList.remove('flipped');
+      matches++;
+      first = null;
+      second = null;
+      updateStatus();
+
+      if (matches === selected.length) {
+        status.textContent = `🎉 You found them all in ${moves} moves!`;
+        board.classList.remove('celebrate');
+        void board.offsetWidth;
+        board.classList.add('celebrate');
+        if (navigator.vibrate) navigator.vibrate([80,50,80]);
+      }
+    } else {
+      lock = true;
+      updateStatus();
+      setTimeout(() => {
+        first.classList.remove('flipped');
+        second.classList.remove('flipped');
+        first = null;
+        second = null;
+        lock = false;
+      }, 850);
+    }
+  }
+
+  function updateStatus() {
+    status.textContent = `${matches} match${matches===1?'':'es'} · ${moves} move${moves===1?'':'s'}`;
+  }
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+  }
+})();
+</script>
+</body>
+</html>
