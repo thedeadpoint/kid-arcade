@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Photo Puzzle</title>
+<style>
+  :root {
+    --bg: #f5f4ef;
+    --panel: #ffffff;
+    --text: #1f2933;
+    --accent: #3b6ea8;
+    --muted: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  body {
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  }
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  h1 {
+    margin: 4px 0 8px;
+    font-size: clamp(28px, 7vw, 42px);
+    text-align: center;
+  }
+  .sub {
+    text-align: center;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+  .panel {
+    background: var(--panel);
+    border-radius: 18px;
+    padding: 14px;
+    box-shadow: 0 6px 22px rgba(0,0,0,.08);
+  }
+  .controls {
+    display: grid;
+    gap: 10px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  @media (min-width: 560px) {
+    .row { grid-template-columns: 1fr 1fr; }
+  }
+  label.button, button, select {
+    width: 100%;
+    min-height: 48px;
+    border: 0;
+    border-radius: 12px;
+    font-size: 17px;
+    padding: 0 14px;
+  }
+  label.button, button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent);
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  button.secondary {
+    background: #e8edf3;
+    color: var(--text);
+  }
+  button:disabled {
+    opacity: .45;
+    cursor: default;
+  }
+  select {
+    background: #eef1f4;
+    color: var(--text);
+    font-weight: 600;
+  }
+  input[type=file] { display:none; }
+
+  #stage {
+    margin-top: 16px;
+    display: grid;
+    place-items: center;
+  }
+  #puzzle {
+    width: min(92vw, 620px);
+    aspect-ratio: 1 / 1;
+    position: relative;
+    overflow: hidden;
+    border-radius: 14px;
+    background: #d9dde2;
+    border: 3px solid white;
+    box-shadow: 0 6px 18px rgba(0,0,0,.12);
+    touch-action: none;
+  }
+  .piece {
+    position: absolute;
+    background-repeat: no-repeat;
+    border: 1px solid rgba(255,255,255,.7);
+    transition: left .18s ease, top .18s ease, transform .12s ease;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  .piece.dragging {
+    z-index: 20;
+    transition: none;
+    transform: scale(1.04);
+    box-shadow: 0 6px 14px rgba(0,0,0,.25);
+    cursor: grabbing;
+  }
+  .status {
+    text-align: center;
+    font-weight: 700;
+    margin-top: 12px;
+    min-height: 24px;
+  }
+  .hint {
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 6px;
+  }
+  #preview {
+    display: none;
+    max-width: 100%;
+  }
+  .celebrate {
+    animation: pop .55s ease;
+  }
+  @keyframes pop {
+    0% { transform: scale(.96); }
+    45% { transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧩 Photo Puzzle</h1>
+  <div class="sub">Choose a photo, shuffle it, and put it back together.</div>
+
+  <div class="panel controls">
+    <label class="button" for="photoInput">Choose Photo</label>
+    <input id="photoInput" type="file" accept="image/*" />
+
+    <div class="row">
+      <select id="difficulty" aria-label="Difficulty">
+        <option value="2">Easy · 2 × 2</option>
+        <option value="3" selected>Medium · 3 × 3</option>
+        <option value="4">Hard · 4 × 4</option>
+        <option value="5">Very Hard · 5 × 5</option>
+      </select>
+      <button id="shuffleBtn" disabled>Shuffle</button>
+    </div>
+
+    <button id="showBtn" class="secondary" disabled>Show Photo</button>
+  </div>
+
+  <div id="stage">
+    <div id="puzzle" aria-label="Puzzle board"></div>
+    <div id="status" class="status">Choose a photo to begin.</div>
+    <div class="hint">Drag one tile onto another to swap them.</div>
+  </div>
+
+  <img id="preview" alt="Selected photo preview" />
+</div>
+
+<script>
+(() => {
+  const photoInput = document.getElementById('photoInput');
+  const difficulty = document.getElementById('difficulty');
+  const shuffleBtn = document.getElementById('shuffleBtn');
+  const showBtn = document.getElementById('showBtn');
+  const puzzle = document.getElementById('puzzle');
+  const status = document.getElementById('status');
+  const preview = document.getElementById('preview');
+
+  let imageURL = null;
+  let imageObj = new Image();
+  let grid = 3;
+  let pieces = [];
+  let positions = [];
+  let dragging = null;
+  let showOriginal = false;
+  let crop = {x:0, y:0, size:1};
+
+  photoInput.addEventListener('change', () => {
+    const file = photoInput.files && photoInput.files[0];
+    if (!file) return;
+
+    if (imageURL) URL.revokeObjectURL(imageURL);
+    imageURL = URL.createObjectURL(file);
+
+    imageObj = new Image();
+    imageObj.onload = () => {
+      const size = Math.min(imageObj.naturalWidth, imageObj.naturalHeight);
+      crop = {
+        x: (imageObj.naturalWidth - size) / 2,
+        y: (imageObj.naturalHeight - size) / 2,
+        size
+      };
+      grid = Number(difficulty.value);
+      buildPuzzle(false);
+      shuffleBtn.disabled = false;
+      showBtn.disabled = false;
+      status.textContent = 'Ready! Tap Shuffle.';
+    };
+    imageObj.src = imageURL;
+  });
+
+  difficulty.addEventListener('change', () => {
+    grid = Number(difficulty.value);
+    if (imageURL) {
+      buildPuzzle(false);
+      status.textContent = 'Ready! Tap Shuffle.';
+    }
+  });
+
+  shuffleBtn.addEventListener('click', () => {
+    if (!imageURL) return;
+    shuffle();
+  });
+
+  showBtn.addEventListener('click', () => {
+    if (!imageURL) return;
+    showOriginal = !showOriginal;
+    if (showOriginal) {
+      pieces.forEach((p, i) => setPiecePosition(p, i, false));
+      showBtn.textContent = 'Hide Photo';
+      status.textContent = 'Photo preview';
+    } else {
+      positions.forEach((pieceId, pos) => {
+        const p = pieces.find(x => x.dataset.id == pieceId);
+        setPiecePosition(p, pos, false);
+      });
+      showBtn.textContent = 'Show Photo';
+      status.textContent = 'Back to the puzzle.';
+    }
+  });
+
+  function buildPuzzle(shuffled) {
+    puzzle.innerHTML = '';
+    pieces = [];
+    positions = Array.from({length: grid * grid}, (_, i) => i);
+
+    const pct = 100 / grid;
+
+    for (let i = 0; i < grid * grid; i++) {
+      const r = Math.floor(i / grid);
+      const c = i % grid;
+      const piece = document.createElement('div');
+      piece.className = 'piece';
+      piece.dataset.id = i;
+      piece.style.width = pct + '%';
+      piece.style.height = pct + '%';
+
+      const scale = grid;
+      const bgW = scale * 100;
+      const bgH = scale * 100;
+      piece.style.backgroundImage = `url("${imageURL}")`;
+      piece.style.backgroundSize = `${bgW}% ${bgH}%`;
+
+      const x = grid === 1 ? 0 : (c / (grid - 1)) * 100;
+      const y = grid === 1 ? 0 : (r / (grid - 1)) * 100;
+      piece.style.backgroundPosition = `${x}% ${y}%`;
+
+      addDragHandlers(piece);
+      pieces.push(piece);
+      puzzle.appendChild(piece);
+      setPiecePosition(piece, i, false);
+    }
+
+    if (shuffled) shuffle();
+  }
+
+  function setPiecePosition(piece, pos, animate=true) {
+    const r = Math.floor(pos / grid);
+    const c = pos % grid;
+    const pct = 100 / grid;
+    if (!animate) piece.style.transition = 'none';
+    piece.style.left = (c * pct) + '%';
+    piece.style.top = (r * pct) + '%';
+    if (!animate) requestAnimationFrame(() => piece.style.transition = '');
+    piece.dataset.pos = pos;
+  }
+
+  function shuffle() {
+    showOriginal = false;
+    showBtn.textContent = 'Show Photo';
+
+    let arr = Array.from({length: grid * grid}, (_, i) => i);
+    do {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    } while (arr.every((v, i) => v === i));
+
+    positions = arr.slice();
+
+    positions.forEach((pieceId, pos) => {
+      const p = pieces[pieceId];
+      setPiecePosition(p, pos);
+    });
+
+    status.textContent = 'Puzzle shuffled!';
+  }
+
+  function addDragHandlers(piece) {
+    piece.addEventListener('pointerdown', e => {
+      if (showOriginal) return;
+      e.preventDefault();
+      piece.setPointerCapture(e.pointerId);
+      const rect = puzzle.getBoundingClientRect();
+      const pRect = piece.getBoundingClientRect();
+
+      dragging = {
+        piece,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        originalLeft: pRect.left - rect.left,
+        originalTop: pRect.top - rect.top,
+        startPos: Number(piece.dataset.pos)
+      };
+      piece.classList.add('dragging');
+    });
+
+    piece.addEventListener('pointermove', e => {
+      if (!dragging || dragging.piece !== piece) return;
+      const rect = puzzle.getBoundingClientRect();
+      const dx = e.clientX - dragging.startX;
+      const dy = e.clientY - dragging.startY;
+      piece.style.left = ((dragging.originalLeft + dx) / rect.width * 100) + '%';
+      piece.style.top = ((dragging.originalTop + dy) / rect.height * 100) + '%';
+    });
+
+    piece.addEventListener('pointerup', e => finishDrag(e));
+    piece.addEventListener('pointercancel', e => finishDrag(e));
+  }
+
+  function finishDrag(e) {
+    if (!dragging) return;
+
+    const piece = dragging.piece;
+    const rect = puzzle.getBoundingClientRect();
+
+    let x = Math.max(0, Math.min(rect.width - 1, e.clientX - rect.left));
+    let y = Math.max(0, Math.min(rect.height - 1, e.clientY - rect.top));
+
+    const c = Math.min(grid - 1, Math.floor(x / (rect.width / grid)));
+    const r = Math.min(grid - 1, Math.floor(y / (rect.height / grid)));
+    const targetPos = r * grid + c;
+    const startPos = dragging.startPos;
+
+    piece.classList.remove('dragging');
+
+    if (targetPos !== startPos) {
+      const otherPieceId = positions[targetPos];
+      const draggedId = Number(piece.dataset.id);
+      const other = pieces[otherPieceId];
+
+      positions[startPos] = otherPieceId;
+      positions[targetPos] = draggedId;
+
+      setPiecePosition(other, startPos);
+      setPiecePosition(piece, targetPos);
+    } else {
+      setPiecePosition(piece, startPos);
+    }
+
+    dragging = null;
+    checkWin();
+  }
+
+  function checkWin() {
+    const won = positions.every((pieceId, pos) => pieceId === pos);
+    if (won) {
+      status.textContent = '🎉 You solved it!';
+      puzzle.classList.remove('celebrate');
+      void puzzle.offsetWidth;
+      puzzle.classList.add('celebrate');
+      if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    if (!imageURL) return;
+    positions.forEach((pieceId, pos) => {
+      const p = pieces[pieceId];
+      setPiecePosition(p, pos, false);
+    });
+  });
+})();
+</script>
+</body>
+</html>
