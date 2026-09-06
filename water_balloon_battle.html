@@ -1,0 +1,43 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Water Balloon Battle</title><style>
+*{box-sizing:border-box}body{font-family:system-ui;margin:0;background:#dff3ff;color:#18324a;padding:14px}main{max-width:650px;margin:auto}a{font-weight:800;color:#24618f;text-decoration:none}h1{text-align:center;margin:8px}.sub,.note{text-align:center;color:#657789}.card{background:white;border-radius:20px;padding:14px;box-shadow:0 5px 18px #0002}.screen{display:none}.active{display:block}.names{display:grid;grid-template-columns:1fr 1fr;gap:8px}input,button{font:inherit}input{width:100%;padding:11px;border:2px solid #d7e2ea;border-radius:10px}.btn{width:100%;min-height:48px;border:0;border-radius:12px;background:#2e79b7;color:white;font-weight:800;margin-top:10px}.pass{text-align:center;padding:35px 12px}.big{font-size:65px}.yard{background:#72b85b;padding:7px;border-radius:14px}.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;aspect-ratio:1}.cell{border:0;border-radius:7px;background:#ffffff99;font-size:24px;padding:0}.hit{background:#ffcf4a}.miss{background:#b9dcf4}.status{text-align:center;font-size:18px;font-weight:800;min-height:28px;margin:10px}.targets{margin:8px 0}.target{padding:7px;background:#f0f6f9;border-radius:9px;margin:5px 0}.score{display:flex;justify-content:space-between;font-size:13px;color:#657789;font-weight:700}
+</style></head><body><main><a href="index.html">‹ Kid Arcade</a><h1>💦 Water Balloon Battle</h1><p class="sub">Hide your backyard stuff. Soak your opponent's!</p>
+<section id="intro" class="screen active card"><div class="names"><input id="n0" value="Player 1"><input id="n1" value="Player 2"></div><p class="note">Each player secretly hides 5 targets. Pass the phone after every throw.</p><button class="btn" onclick="begin()">Set Up Backyards</button></section>
+<section id="pass" class="screen card pass"><div class="big">🙈📱</div><h2 id="pt"></h2><p id="pp"></p><button id="pb" class="btn">I'm Ready</button></section>
+<section id="setup" class="screen card"><h2 id="st"></h2><p class="note">Tap a square to hide the highlighted target. Long targets extend right or down automatically.</p><div id="targets" class="targets"></div><div class="yard"><div id="sg" class="grid"></div></div><div id="ss" class="status"></div><button class="btn" onclick="clearYard()">Start This Yard Over</button></section>
+<section id="play" class="screen card"><h2 id="turn"></h2><div class="score"><span id="sc0"></span><span id="sc1"></span></div><p class="note">Tap one square to toss a balloon.</p><div class="yard"><div id="pg" class="grid"></div></div><div id="ps" class="status"></div></section>
+<section id="win" class="screen card pass"><div class="big">🏆💦</div><h2 id="wt"></h2><p>All five backyard targets are soaked!</p><button class="btn" onclick="location.reload()">Play Again</button></section>
+<script>
+const S=7,T=[["Garden Gnome","🧙",1],["Kiddie Pool","🏊",2],["Sandbox","🏖️",2],["Swing Set","🛝",3],["Picnic Table","🧺",3]];
+let P=[],sp=0,ti=0,turn=0;
+const $=x=>document.getElementById(x),blank=()=>Array.from({length:S*S},()=>({t:-1,shot:false}));
+function show(x){document.querySelectorAll(".screen").forEach(e=>e.classList.remove("active"));$(x).classList.add("active")}
+function begin(){P=[{n:$("n0").value||"Player 1",b:blank()},{n:$("n1").value||"Player 2",b:blank()}];sp=0;passSetup()}
+function pass(title,text,fn){show("pass");$("pt").textContent=title;$("pp").textContent=text;$("pb").onclick=fn}
+function passSetup(){pass("Pass to "+P[sp].n+"!","No peeking at the other backyard.",()=>{show("setup");drawSetup()})}
+function drawSetup(){
+ $("st").textContent=P[sp].n+"'s Backyard";$("targets").innerHTML=T.map((t,i)=>`<div class="target">${t[1]} <b>${t[0]}</b> — ${t[2]} square${t[2]>1?"s":""} ${i<ti?"✓":i===ti?"← hide this":""}</div>`).join("");
+ $("sg").innerHTML="";P[sp].b.forEach((c,i)=>{let b=document.createElement("button");b.className="cell";b.textContent=c.t>=0?T[c.t][1]:"";b.onclick=()=>place(i);$("sg").appendChild(b)});
+ $("ss").textContent=ti<T.length?"Hide the "+T[ti][1]+" "+T[ti][0]:"Backyard ready!";
+ if(ti===T.length){let b=document.createElement("button");b.className="btn";b.textContent="Lock In My Backyard";b.onclick=finishSetup;$("ss").appendChild(document.createElement("br"));$("ss").appendChild(b)}
+}
+function place(i){
+ if(ti>=T.length)return;let B=P[sp].b,len=T[ti][2],r=Math.floor(i/S),c=i%S,opts=[];
+ if(len===1)opts=[[i]];else{if(c+len<=S)opts.push(Array.from({length:len},(_,k)=>i+k));if(r+len<=S)opts.push(Array.from({length:len},(_,k)=>i+k*S))}
+ opts=opts.filter(a=>a.every(j=>B[j].t<0));if(!opts.length){$("ss").textContent="That won't fit there. Try another square.";return}
+ opts[0].forEach(j=>B[j].t=ti);ti++;drawSetup()
+}
+function clearYard(){P[sp].b=blank();ti=0;drawSetup()}
+function finishSetup(){if(sp===0){sp=1;ti=0;passSetup()}else{turn=0;passTurn()}}
+function passTurn(){pass("Pass to "+P[turn].n+"!",P[turn].n+", get ready to throw one water balloon.",()=>{show("play");drawPlay()})}
+function destroyed(B,t){return B.some(c=>c.t===t)&&B.every(c=>c.t!==t||c.shot)}
+function score(a){let B=P[1-a].b;return T.filter((_,i)=>destroyed(B,i)).length}
+function drawPlay(){
+ let B=P[1-turn].b;$("turn").textContent=P[turn].n+"'s Turn";$("sc0").textContent=P[0].n+": "+score(0)+" soaked";$("sc1").textContent=P[1].n+": "+score(1)+" soaked";$("pg").innerHTML="";
+ B.forEach((c,i)=>{let b=document.createElement("button");b.className="cell"+(c.shot?(c.t>=0?" hit":" miss"):"");b.disabled=c.shot;b.textContent=c.shot?(c.t>=0?"💥":"💧"):"";b.onclick=()=>shoot(i);$("pg").appendChild(b)});$("ps").textContent="Choose a square!"
+}
+function shoot(i){
+ let B=P[1-turn].b,c=B[i];if(c.shot)return;c.shot=true;drawPlay();$("ps").textContent=c.t>=0?(destroyed(B,c.t)?"🎯 SOAKED! "+T[c.t][1]+" "+T[c.t][0]+"!":"💥 SPLASH! You hit something!"):"💧 Miss! Just grass.";
+ document.querySelectorAll("#pg button").forEach(x=>x.disabled=true);
+ if(score(turn)===T.length){setTimeout(()=>{show("win");$("wt").textContent=P[turn].n+" wins!"},900)}else setTimeout(()=>{turn=1-turn;passTurn()},1200)
+}
+</script></body></html>
